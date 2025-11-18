@@ -11,6 +11,7 @@
 # My Twilio phone number : +14155238886
 
 
+
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -35,6 +36,13 @@ HOURLY_RATE = 14.53
 TAX_RATE = 0.2764
 CONTRACT_HOURS = 151.67
 BONUS_AMOUNT = 6.0
+
+tw_sid = "ACa784d95bb8df4036d7c7b6a8df6e478c"
+tw_token = "cb1de20d421f56c9dcecbed3842a8b55"
+tw_from = "+14155238886"
+wa_token = "EAANXBTTBzQcBP78A5a7v3anBqPGUhIY75ZA5KQkfVvhHTxUfOrscLGHFwaJi7ahQ6t3osc9njiszBUk9Dy1A7I1v92Y6hegScml4ZBy9OnZA3kxZCgBLOZCZBnah5ZAASbBxfWErmvOHF4BgfVETF3wS7RhEJhFhnQd1oqtohPwA9T4lnePQZAZCoi8lxBTXVEUQaAZC84UZCGZCAx7qtEdle5F9JPSkCmPA2vacUb8YPmImOC6ClgPgXR5IMCytwBIMMP0guYN4Mb156ZB9YDOMFzZAa6cwtTEUf3NVTJRIBqdgZDZD"
+wa_phone_id = "795690100304535"
+
 
 st.set_page_config(page_title="MUL Salary Tracker", layout="wide")
 
@@ -156,11 +164,7 @@ def save_to_storage(df, engine=None):
     with engine.connect() as conn:
         df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
 
-tw_sid = "ACa784d95bb8df4036d7c7b6a8df6e478c"
-tw_token = "cb1de20d421f56c9dcecbed3842a8b55"
-tw_from = "+14155238886"
-wa_token = "EAANXBTTBzQcBP78A5a7v3anBqPGUhIY75ZA5KQkfVvhHTxUfOrscLGHFwaJi7ahQ6t3osc9njiszBUk9Dy1A7I1v92Y6hegScml4ZBy9OnZA3kxZCgBLOZCZBnah5ZAASbBxfWErmvOHF4BgfVETF3wS7RhEJhFhnQd1oqtohPwA9T4lnePQZAZCoi8lxBTXVEUQaAZC84UZCGZCAx7qtEdle5F9JPSkCmPA2vacUb8YPmImOC6ClgPgXR5IMCytwBIMMP0guYN4Mb156ZB9YDOMFzZAa6cwtTEUf3NVTJRIBqdgZDZD"
-wa_phone_id = "795690100304535"
+
 
 # ---- INITIALIZE STORAGE ----
 engine = ensure_storage()
@@ -310,9 +314,9 @@ with tabs[2]:
         months = sorted(list(set([(d.year, d.month) for d in df['date']] )), reverse=True)
         month_sel = st.selectbox("Select year-month", options=months, format_func=lambda ym: f"{ym[0]}-{ym[1]:02d}")
         year, month = month_sel
-        # df_m = df[[d.year==year and d.month==month for d in pd.to_datetime(df['date'])]]
+
         df_dates = pd.to_datetime(df['date'])
-        # df_m = df[(df_dates.dt.year == year) & (df_dates.dt.month == month)]
+
         df_m = df[df_dates.dt.month == current_month]
         df_m = df_m.sort_values('date')
         st.subheader(f"Entries for {year}-{month:02d}")
@@ -345,10 +349,7 @@ with tabs[2]:
         plt.xticks(rotation=45, ha='right')
         st.pyplot(fig)
         st.write("---")
-        st.subheader("Send WhatsApp Summary")
-        wa_method = st.selectbox("Choose WhatsApp method", options=["Twilio (recommended)", "WhatsApp Cloud API (Meta)", "None"])
-        phone = st.text_input("WhatsApp number (international format, e.g. +49172...)", value="")
-        # Construct the WhatsApp message
+
         message = (
             f"MUL Company - Monthly Summary ({year}-{month:02d})\n"
             f"Total worked hours: {total_hours:.2f} h\n"
@@ -361,9 +362,6 @@ with tabs[2]:
             f"Net pay: €{net_total:.2f}"
         )
 
-        # if wa_method == "Twilio (recommended)":
-        #     if st.session_state.get("tw_sid") and st.session_state.get("tw_token") and st.session_state.get("tw_from") and phone:
-        #         sid = send_whatsapp_twilio(st.session_state["tw_sid"], st.session_state["tw_token"], st.session_state["tw_from"], phone, message)
         
         if st.button("Preview message"):
             message = (f"MUL Company - Monthly Summary ({year}-{month:02d})\n"
@@ -377,32 +375,19 @@ with tabs[2]:
                        f"Net pay: €{net_total:.2f}\n")
             st.text_area("Preview message", value=message, height=220)
             # send_email("bhavikpatel7173@gmail.com", "MUL Salary", "Hello Bhavik, "+message)
-            
-        if st.button("Send WhatsApp"):
-            if wa_method == "Twilio (recommended)":
-                if tw_sid and tw_token and tw_from and phone:
-                    try:
-                        sid = send_whatsapp_twilio(tw_sid, tw_token, tw_from, phone, message)
-                        send_email("bhavikpatel7173@gmail.com", "MUL Salary", "Hello Bhavik, \n \n \n"+ message)
-                        st.success(f"Message sent via Twilio! SID: {sid}")
-                    except Exception as e:
-                        st.error(f"Twilio send failed: {e}")
-                else:
-                    st.warning("Please enter all Twilio credentials and recipient phone number.")
-            
-            elif wa_method == "WhatsApp Cloud API (Meta)":
-                if wa_token and wa_phone_id and phone:
-                    try:
-                        resp = send_whatsapp_cloud(wa_token, wa_phone_id, phone, message)
-                        send_email("bhavikpatel7173@gmail.com", "MUL Salary", "Hello Bhavik, \n \n \n"+ message)
-                        st.success(f"Message sent via WhatsApp Cloud! Response: {resp}")
-                    except Exception as e:
-                        st.error(f"WhatsApp Cloud send failed: {e}")
-                else:
-                    st.warning("Please enter WhatsApp Cloud API token, phone ID, and recipient number.")
-            
+
+        st.subheader("📧 Send Summary via Email")
+
+        email_to = st.text_input("Recipient Email")
+
+        if st.button("Send Email"):
+            if not email_to.strip():
+                st.error("Please enter a valid email")
             else:
-                st.info("Send method is None. No message sent.")
+                ok = send_email(email_to, "MUL Salary Summary", message)
+                if ok:
+                    st.success(f"Email sent successfully to {email_to}!")
+
         if st.button("Export monthly CSV"):
             towrite = io.BytesIO()
             df_out = df_m.copy()
