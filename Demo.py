@@ -26,6 +26,16 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
+from reportlab.platypus import (
+    SimpleDocTemplate, Table, TableStyle,
+    Paragraph, Spacer
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from io import BytesIO
+from datetime import datetime
+
 # ---------------- CONFIG ----------------
 CSV_PATH = "work_log.csv"
 SQLITE_PATH = "work_log.db"
@@ -33,10 +43,11 @@ TABLE_NAME = "daily_records"
 SETTINGS_PATH = "mul_settings.json"
 LOGO_PATH = "logo.png"
 
-HOURLY_RATE = 14.53
+# HOURLY_RATE = 14.53
 TAX_RATE = 0.2764
 CONTRACT_HOURS = 151.67
 BONUS_AMOUNT = 6.0
+INITIAL_AZK=65.77
 
 # default sender fallback (prefer user to set via Settings tab)
 DEFAULT_SENDER_EMAIL = ""
@@ -63,8 +74,10 @@ settings = load_settings()
 def ensure_storage():
     if not os.path.exists(CSV_PATH):
         df = pd.DataFrame(columns=[
+            "id",  # 👈 NEW
             "date","day","public_holiday","start_time","end_time","break_hours",
-            "working_hours","bonus","travel_eur","gross_pay","tax","net_pay","gross_hourly","source","notes"
+            "working_hours","bonus","travel_eur","gross_pay","tax","net_pay","gross_hourly",
+            "source","notes"
         ])
         df.to_csv(CSV_PATH, index=False)
     engine = create_engine(f"sqlite:///{SQLITE_PATH}", echo=False)
@@ -131,11 +144,38 @@ def load_data(engine=None):
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
     return df
 
+def ensure_id_column(df):
+    if "id" not in df.columns:
+        df = df.copy()
+        df.insert(0, "id", range(1, len(df) + 1))
+    df["id"] = df["id"].astype(int)
+    return df
+
 def save_to_storage(df, engine=None):
     df.to_csv(CSV_PATH, index=False)
     engine = engine or create_engine(f"sqlite:///{SQLITE_PATH}")
     with engine.connect() as conn:
         df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
+
+def calculate_azk_bank(df, target_year, target_month, initial_azk=0.0):
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date")
+
+    azk_bank = initial_azk
+    month_change = 0.0
+
+    for (y, m), g in df.groupby([df["date"].dt.year, df["date"].dt.month]):
+        worked = g["working_hours"].sum()
+        diff = worked - CONTRACT_HOURS
+
+        azk_bank += diff
+
+        if y == target_year and m == target_month:
+            month_change = diff
+            break   # ⛔ stop here, do NOT continue
+
+    return round(azk_bank, 2), round(month_change, 2)
 
 # ---------------- EMAIL (HTML + attachment) ----------------
 def build_email_html(summary, company_name="MUL Company"):
@@ -374,33 +414,46 @@ tabs = st.tabs(["Daily Entry", "Upload Excel/CSV", "Monthly Summary", "Settings"
 # ---- DAILY ENTRY TAB ----
 with tabs[0]:
     st.header("Daily Entry")
+    HOURLY_RATE = st.number_input("Hourly Rate (€)", value=14.53)
     col1, col2, col3 = st.columns(3)
     with col1:
         date_input = st.date_input("Date", value=datetime.today().date())
         public_holiday = st.checkbox("Public Holiday", value=False)
         travel = st.number_input("Travel (€)", min_value=0.0, value=0.0, step=0.5)
+
     with col2:
-        start_time = st.text_input("Start Time (HH:MM) - leave blank if holiday", value="08:00")
-        end_time = st.text_input("End Time (HH:MM) - leave blank if holiday", value="16:30")
+        start_time = st.text_input("Start Time (HH:MM)", value="08:00")
+        end_time = st.text_input("End Time (HH:MM)", value="16:30")
+
     with col3:
         break_hours = st.number_input("Break (hours)", min_value=0.0, value=0.5, step=0.25)
-        notes = st.text_input("Notes (optional)")
-    save_btn = st.button("Save Day")
+        notes = st.text_input("Notes")
 
-    if save_btn:
+    # ---- SAVE DAY ----
+    if st.button("Save Day"):
+        df = ensure_id_column(load_data(engine))
+
+        if "id" not in df.columns:
+            df["id"] = []
+
+        new_id = int(df["id"].max() + 1) if not df.empty else 1
+
         row = {
+            "id": new_id,
             "date": date_input,
             "day": date_input.strftime("%A"),
             "public_holiday": "Y" if public_holiday else "N",
-            "start_time": start_time if start_time else "",
-            "end_time": end_time if end_time else "",
+            "start_time": start_time,
+            "end_time": end_time,
             "break_hours": break_hours,
             "travel_eur": travel,
-            "source": "manual",
-            "notes": notes
+            "notes": notes,
+            "source": "manual"
         }
+
         wh = compute_hours(row)
         bonus, gross, tax, net, gross_hourly = compute_row_financials(wh, travel)
+
         row.update({
             "working_hours": wh,
             "bonus": bonus,
@@ -409,22 +462,76 @@ with tabs[0]:
             "net_pay": net,
             "gross_hourly": gross_hourly
         })
-        df = load_data(engine)
-        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True, sort=False)
+
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
         save_to_storage(df, engine)
-        st.success(f"Saved {date_input} | Hours: {wh} | Net: €{net}")
+        st.success(f"Saved | Hours: {wh} | Net: €{net}")
 
     st.markdown("---")
-    st.subheader("This month's entries (editable via CSV/DB)")
-    df = load_data(engine)
-    if not df.empty:
+    st.subheader("✏️ Edit / Delete Records")
+
+    df = ensure_id_column(load_data(engine))
+
+    if df.empty:
+        st.info("No data available.")
+    else:
+        # Show only current month
+        df["date"] = pd.to_datetime(df["date"]).dt.date
         current_month = datetime.today().month
-        df['date'] = pd.to_datetime(df['date']).dt.date
-        df_m = df[[d.month == current_month for d in pd.to_datetime(df['date'])]]
-        if df_m.empty:
-            st.info("No entries for this month yet.")
-        else:
-            st.dataframe(df_m.sort_values('date'))
+        df_m = df[df["date"].apply(lambda d: d.month) == current_month]
+
+        edited_df = st.data_editor(
+            df_m,
+            use_container_width=True,
+            disabled=[
+                "working_hours", "gross_pay",
+                "tax", "net_pay", "gross_hourly", "bonus"
+            ],
+            key="crud_editor"
+        )
+
+        col_u, col_d = st.columns(2)
+
+        # ---- UPDATE ----
+        with col_u:
+            if st.button("💾 Save Changes"):
+                updated_rows = []
+
+                for _, r in edited_df.iterrows():
+                    wh = compute_hours(r)
+                    bonus, gross, tax, net, gross_hourly = compute_row_financials(
+                        wh, r.get("travel_eur", 0)
+                    )
+
+                    r["working_hours"] = wh
+                    r["bonus"] = bonus
+                    r["gross_pay"] = gross
+                    r["tax"] = tax
+                    r["net_pay"] = net
+                    r["gross_hourly"] = gross_hourly
+
+                    updated_rows.append(r)
+
+                updated_df = pd.DataFrame(updated_rows)
+
+                # Merge back with full dataset
+                updated_df = ensure_id_column(updated_df)
+                df = ensure_id_column(df)
+
+                df_rest = df[~df["id"].isin(updated_df["id"])]
+                final_df = pd.concat([df_rest, updated_df], ignore_index=True)
+
+                save_to_storage(final_df, engine)
+                st.success("✅ Records updated successfully")
+
+        # ---- DELETE ----
+        with col_d:
+            delete_id = st.number_input("Enter ID to delete", min_value=1, step=1)
+            if st.button("🗑️ Delete Row"):
+                df = df[df["id"] != delete_id]
+                save_to_storage(df, engine)
+                st.success(f"❌ Deleted record with ID {delete_id}")
+
 
 # ---- UPLOAD TAB ----
 with tabs[1]:
@@ -487,7 +594,7 @@ with tabs[1]:
                     })
                     processed.append(row)
                 new_df = pd.DataFrame(processed)
-                df = load_data(engine)
+                df = ensure_id_column(load_data(engine))
                 for d in new_df['date'].unique():
                     df = df[df['date'] != pd.to_datetime(d).date()]
                 df = pd.concat([df, new_df], ignore_index=True, sort=False)
@@ -499,7 +606,7 @@ with tabs[1]:
 # ---- MONTHLY SUMMARY TAB ----
 with tabs[2]:
     st.header("Monthly Summary & Payslip")
-    df = load_data(engine)
+    df = ensure_id_column(load_data(engine))
     if df.empty:
         st.info("No records yet. Add data via Daily Entry or Upload.")
     else:
@@ -515,21 +622,89 @@ with tabs[2]:
             df_m = df[(df_dates.dt.year == year) & (df_dates.dt.month == month)]
             df_m = df_m.sort_values('date')
             st.subheader(f"Entries for {year}-{month:02d}")
-            st.dataframe(df_m)
+
+            df_m = ensure_id_column(df_m)
+
+            # Add delete flag column
+            if "delete" not in df_m.columns:
+                df_m["delete"] = False
+
+            edited_df = st.data_editor(
+                df_m,
+                use_container_width=True,
+                disabled=[
+                    "id", "working_hours", "gross_pay",
+                    "tax", "net_pay", "gross_hourly", "bonus"
+                ],
+                column_config={
+                    "delete": st.column_config.CheckboxColumn(
+                        "🗑️ Delete",
+                        help="Select row to delete"
+                    )
+                },
+                key="monthly_crud"
+            )
+
+            col_u, col_d = st.columns(2)
+
+            # ---- UPDATE ----
+            with col_u:
+                if st.button("💾 Save Monthly Changes"):
+                    updated_rows = []
+
+                    for _, r in edited_df.iterrows():
+                        wh = compute_hours(r)
+                        bonus, gross, tax, net, gross_hourly = compute_row_financials(
+                            wh, r.get("travel_eur", 0)
+                        )
+
+                        r["working_hours"] = wh
+                        r["bonus"] = bonus
+                        r["gross_pay"] = gross
+                        r["tax"] = tax
+                        r["net_pay"] = net
+                        r["gross_hourly"] = gross_hourly
+
+                        updated_rows.append(r)
+
+                    updated_df = pd.DataFrame(updated_rows)
+
+                    df_rest = df[~df["id"].isin(updated_df["id"])]
+                    final_df = pd.concat([df_rest, updated_df.drop(columns=["delete"])], ignore_index=True)
+
+                    save_to_storage(final_df, engine)
+                    st.success("✅ Monthly records updated")
+
+            # ---- DELETE ----
+            with col_d:
+                if st.button("🗑️ Delete Selected Rows"):
+                    delete_ids = edited_df.loc[edited_df["delete"] == True, "id"].tolist()
+
+                    if not delete_ids:
+                        st.warning("No rows selected for deletion")
+                    else:
+                        df = df[~df["id"].isin(delete_ids)]
+                        save_to_storage(df, engine)
+                        st.success(f"❌ Deleted {len(delete_ids)} row(s)")
+            # st.dataframe(df_m)
+            azk_bank, azk_change = calculate_azk_bank(df, year, month, INITIAL_AZK)
 
             total_hours = df_m['working_hours'].sum()
             payable_hours = min(total_hours, CONTRACT_HOURS)
-            azk_hours = total_hours - CONTRACT_HOURS
+
             bonus_total = df_m['bonus'].sum() if 'bonus' in df_m.columns else 0.0
             travel_total = df_m['travel_eur'].sum() if 'travel_eur' in df_m.columns else 0.0
-            salario = round(payable_hours * HOURLY_RATE,2)
-            tax_total = round(payable_hours * HOURLY_RATE * TAX_RATE,2)
-            net_total = round(salario - tax_total + bonus_total + travel_total,2)
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total hours", f"{total_hours:.2f} h", delta=f"{azk_hours:.2f} h")
+            salario = round(payable_hours * HOURLY_RATE, 2)
+            tax_total = round(salario * TAX_RATE, 2)
+            net_total = round(salario - tax_total + bonus_total + travel_total, 2)
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total hours", f"{total_hours:.2f} h")
             col2.metric("Payable hours", f"{payable_hours:.2f} h")
-            col3.metric("AZK (this month)", f"{azk_hours:.2f} h")
+            col3.metric("AZK change (this month)", f"{azk_change:.2f} h")
+            col4.metric("AZK bank (end of month)", f"{azk_bank:.2f} h")
+
             st.write("---")
             st.write("Financial Summary")
             st.write(f"Salary for payable hours ({payable_hours:.2f} h): €{salario:.2f}")
@@ -554,7 +729,7 @@ with tabs[2]:
                 f"MUL Company - Monthly Summary ({year}-{month:02d})\n"
                 f"Total worked hours: {total_hours:.2f} h\n"
                 f"Payable hours: {payable_hours:.2f} h\n"
-                f"AZK change: {azk_hours:.2f} h\n"
+                f"AZK change: {azk_bank:.2f} h\n"
                 f"Gross (hourly pay): €{salario:.2f}\n"
                 f"Tax: €{tax_total:.2f}\n"
                 f"Bonus total: €{bonus_total:.2f}\n"

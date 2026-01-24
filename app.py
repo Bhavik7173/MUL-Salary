@@ -174,7 +174,7 @@ engine = ensure_storage()
 st.title("MUL Salary Tracker (Streamlit)")
 st.markdown("Enter daily work data, upload Excel/CSV, or import CSV. App calculates hours, AZK, tax, bonus and summary.")
 
-tabs = st.tabs(["Daily Entry", "Upload Excel/CSV", "Monthly Summary", "Settings"])
+tabs = st.tabs(["Daily Entry", "Upload Excel/CSV", "Monthly Summary", "Settings", "CRUD (Edit/Delete)"])
 
 # ---- DAILY ENTRY TAB ----
 with tabs[0]:
@@ -415,6 +415,97 @@ with tabs[3]:
             st.session_state["wa_token"] = wa_token
             st.session_state["wa_phone_id"] = wa_phone_id
             st.success("Session stored (temporary).")
+
+# ---- CRUD TAB ----
+with tabs[4]:
+    st.header("Manage Records (CRUD Operations)")
+
+    df = load_data(engine)
+
+    if df.empty:
+        st.info("No records found.")
+    else:
+        st.subheader("All Records")
+        st.dataframe(df)
+
+        st.markdown("---")
+        st.subheader("Edit / Delete a Record")
+
+        # Select record by date
+        unique_dates = sorted(df['date'].astype(str).unique())
+        selected_date = st.selectbox("Select Date", unique_dates)
+
+        record = df[df['date'].astype(str) == selected_date].iloc[0]
+
+        st.write("### Edit Fields")
+        day = record["day"]
+        public_holiday = st.checkbox(
+            "Public Holiday",
+            value=(record["public_holiday"] == "Y"),
+            key=f"public_holiday_{selected_date}"
+        )
+
+        start_time = st.text_input(
+            "Start Time",
+            value=str(record["start_time"]),
+            key=f"start_time_{selected_date}"
+        )
+
+        end_time = st.text_input(
+            "End Time",
+            value=str(record["end_time"]),
+            key=f"end_time_{selected_date}"
+        )
+
+        break_hours = st.number_input(
+            "Break Hours",
+            value=float(record["break_hours"]),
+            key=f"break_hours_{selected_date}"
+        )
+
+        travel = st.number_input(
+            "Travel (€)",
+            value=float(record["travel_eur"]),
+            key=f"travel_{selected_date}"
+        )
+
+        notes = st.text_input(
+            "Notes",
+            value=str(record["notes"]),
+            key=f"notes_{selected_date}"
+        )
+
+
+        # Update button
+        if st.button("Update Record"):
+            df.loc[df['date'].astype(str) == selected_date, "public_holiday"] = "Y" if public_holiday else "N"
+            df.loc[df['date'].astype(str) == selected_date, "start_time"] = start_time
+            df.loc[df['date'].astype(str) == selected_date, "end_time"] = end_time
+            df.loc[df['date'].astype(str) == selected_date, "break_hours"] = break_hours
+            df.loc[df['date'].astype(str) == selected_date, "travel_eur"] = travel
+            df.loc[df['date'].astype(str) == selected_date, "notes"] = notes
+
+            # Recalculate hours & payment
+            row = df[df['date'].astype(str) == selected_date].iloc[0]
+            wh = compute_hours(row)
+            bonus, gross, tax, net, gross_hourly = compute_row_financials(wh, travel)
+
+            df.loc[df['date'].astype(str) == selected_date, "working_hours"] = wh
+            df.loc[df['date'].astype(str) == selected_date, "bonus"] = bonus
+            df.loc[df['date'].astype(str) == selected_date, "gross_pay"] = gross
+            df.loc[df['date'].astype(str) == selected_date, "tax"] = tax
+            df.loc[df['date'].astype(str) == selected_date, "net_pay"] = net
+            df.loc[df['date'].astype(str) == selected_date, "gross_hourly"] = gross_hourly
+
+            save_to_storage(df, engine)
+            st.success(f"Record updated for {selected_date}")
+
+        # Delete button
+        if st.button("Delete Record"):
+            df = df[df['date'].astype(str) != selected_date]
+            save_to_storage(df, engine)
+            st.success(f"Record deleted for {selected_date}")
+
 
 st.sidebar.markdown("Quick actions")
 if st.sidebar.button("Open CSV"):
