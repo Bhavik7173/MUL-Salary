@@ -1,12 +1,3 @@
-# streamlit_mul_app.py
-# MUL Salary Tracker - Streamlit prototype
-# Features: Professional PDF payslip (Option B), HTML email template, Excel export, Logo, Dark mode, helper script for automatic monthly email
-# Email : mrbhavik2711@gmail.com
-# Password : jptg mciw wdxi amkg
-
-# streamlit_mul_app.py
-# MUL Salary Tracker - Streamlit prototype (Upgraded: PDF payslip, HTML email template, Excel export, Logo + dark theme, Auto monthly email)
-# Run: streamlit run streamlit_mul_app.py
 
 import streamlit as st
 import pandas as pd
