@@ -24,6 +24,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 from datetime import datetime
+from pdf_utils import generate_payslip_pdf_bytes
 
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle,
