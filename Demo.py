@@ -828,23 +828,41 @@ with tabs[2]:
 
             col_e1, col_e2 = st.columns([2,1])
             with col_e1:
-                if st.button("Generate PDF Payslip (preview)"):
+                if st.button("Generate PDF Payslip (preview)", width="stretch"):
                     if df_m.empty:
                         st.warning("No data this month to generate payslip.")
                     else:
-                        pdf_buf = generate_payslip_pdf(df_m, year, month, logo_path=LOGO_PATH)
-                        st.download_button("Download Payslip PDF", data=pdf_buf, file_name=f"payslip_{year}_{month:02d}.pdf", mime="application/pdf")
+                        pdf_buf = generate_payslip_pdf(
+                            df_m, year, month, logo_path=LOGO_PATH
+                        )
+
+                        st.download_button(
+                            "Download Payslip PDF",
+                            data=pdf_buf,
+                            file_name=f"payslip_{year}_{month:02d}.pdf",
+                            mime="application/pdf",
+                            width="stretch"
+                        )
 
             with col_e2:
-                if st.button("Send Email (with PDF)"):
+                if st.button("Send Email (with PDF)", width="stretch"):
                     if not email_to.strip():
                         st.error("Please enter recipient email.")
                     elif df_m.empty:
                         st.error("No data for this month to send.")
                     else:
-                        pdf_buf = generate_payslip_pdf(df_m, year, month, logo_path=LOGO_PATH)
-                        ok, err = send_email_with_attachment(email_to.strip(), f"MUL Payslip {year}-{month:02d}", html,
-                                                            attachment_bytes=pdf_buf, attachment_name=f"payslip_{year}_{month:02d}.pdf")
+                        pdf_buf = generate_payslip_pdf(
+                            df_m, year, month, logo_path=LOGO_PATH
+                        )
+
+                        ok, err = send_email_with_attachment(
+                            email_to.strip(),
+                            f"MUL Payslip {year}-{month:02d}",
+                            html,
+                            attachment_bytes=pdf_buf,
+                            attachment_name=f"payslip_{year}_{month:02d}.pdf"
+                        )
+
                         if ok:
                             st.success(f"Email sent to {email_to.strip()} (with PDF).")
                         else:
