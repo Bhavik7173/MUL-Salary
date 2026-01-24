@@ -192,8 +192,8 @@ def build_email_html(summary, company_name="MUL Company"):
 
 def send_email_with_attachment(to_email, subject, html_body, attachment_bytes=None, attachment_name="payslip.pdf",
                                sender_email=None, sender_password=None):
-    sender_email = sender_email or st.session_state.get("sender_email") or settings.get("sender_email") or DEFAULT_SENDER_EMAIL
-    sender_password = sender_password or st.session_state.get("sender_password") or settings.get("sender_password") or DEFAULT_SENDER_PASSWORD
+    sender_email = sender_email or st.secrets["SENDER_EMAIL"]
+    sender_password = sender_password or st.secrets["SENDER_PASSWORD"]
 
     if not sender_email or not sender_password:
         return False, "Sender credentials not configured. Set them in Settings."
