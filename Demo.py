@@ -174,7 +174,7 @@ def build_email_html(summary, company_name="MUL Company"):
     html = f"""
     <html>
     <body style="font-family: Arial, Helvetica, sans-serif; color:#222;">
-      <div style="max-width:700px; margin:auto; border:1px solid #e0e0e0;">
+      <div style="max-width:1000px; margin:auto; border:1.2px solid #e0e0e0;">
         <div style="background:#0b5ed7; padding:18px; color:white;">
           <h2 style="margin:0">{company_name} - Monthly Summary</h2>
         </div>
@@ -252,7 +252,7 @@ def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, compa
 
     # summary box
     left_x = 30
-    y = height - 110
+    y = height - 50
     c.setFillColorRGB(0.96,0.96,0.96)
     c.roundRect(left_x, y - 120, width - 60, 110, 6, fill=1)
     c.setFillColorRGB(0,0,0)
