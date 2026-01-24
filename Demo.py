@@ -262,7 +262,6 @@ def generate_payslip_pdf(
     # ===== Employee Info Table =====
     employee_data = [
         ["Employee Name:", employee_name],
-        ["Employee ID:", employee_id],
         ["Generated On:", datetime.now().strftime("%d-%m-%Y")],
     ]
 
