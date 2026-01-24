@@ -252,12 +252,12 @@ def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, compa
 
     # summary box
     left_x = 30
-    y = height - 50
+    y = height - 110
     c.setFillColorRGB(0.96,0.96,0.96)
-    c.roundRect(left_x, y - 120, width - 60, 110, 6, fill=1)
+    c.roundRect(left_x, y - 135, width - 60, 120, 8, fill=1)
     c.setFillColorRGB(0,0,0)
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(left_x + 8, y - 20, "Monthly Summary")
+    c.drawString(left_x + 8, y - 10, "Monthly Summary")
     c.setFont("Helvetica", 10)
 
     total_hours = df_month['working_hours'].sum()
@@ -278,7 +278,7 @@ def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, compa
         f"Net pay: €{net_total:.2f}",
     ]
     tx = left_x + 12
-    ty = y - 40
+    ty = y - 30
     for ln in lines:
         c.drawString(tx, ty, ln)
         ty -= 16
