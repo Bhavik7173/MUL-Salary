@@ -16,6 +16,14 @@ from email.mime.application import MIMEApplication
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib import pagesizes
+from reportlab.lib.units import inch
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
+from datetime import datetime
 
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle,
@@ -222,91 +230,88 @@ def send_email_with_attachment(to_email, subject, html_body, attachment_bytes=No
         return False, str(e)
 
 # ---------------- PDF Payslip generation (Option C: Branded) ----------------
-def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, company_name="MUL Company"):
-    from io import BytesIO
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-    from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import inch
+def generate_payslip_pdf(
+        employee_name,
+        employee_id,
+        start_time,
+        end_time,
+        total_hours,
+        hourly_rate,
+        tax_percent,
+        output_filename="payslip.pdf"
+):
+    # Create PDF document
+    doc = SimpleDocTemplate(
+        output_filename,
+        pagesize=pagesizes.A4
+    )
 
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
     elements = []
-
     styles = getSampleStyleSheet()
-    title = Paragraph(f"<b>{company_name} - Payslip ({year}-{month:02d})</b>", styles["Title"])
-    elements.append(title)
+
+    # ===== Title =====
+    title_style = styles["Heading1"]
+    elements.append(Paragraph("Salary Payslip", title_style))
     elements.append(Spacer(1, 0.3 * inch))
 
-    # ---- SUMMARY SECTION ----
-    total_hours = df_month['working_hours'].sum()
-    payable_hours = min(total_hours, CONTRACT_HOURS)
-    bonus_total = df_month['bonus'].sum()
-    travel_total = df_month['travel_eur'].sum()
-    salario = round(payable_hours * HOURLY_RATE, 2)
-    tax_total = round(salario * TAX_RATE, 2)
-    net_total = round(salario - tax_total + bonus_total + travel_total, 2)
+    # ===== Calculate Salary =====
+    gross_salary = total_hours * hourly_rate
+    tax_amount = gross_salary * (tax_percent / 100)
+    net_salary = gross_salary - tax_amount
 
-    summary_data = [
-        ["Total Worked Hours", f"{total_hours:.2f} h"],
-        ["Payable Hours", f"{payable_hours:.2f} h"],
-        ["Gross Salary", f"€{salario:.2f}"],
-        ["Tax", f"€{tax_total:.2f}"],
-        ["Bonus Total", f"€{bonus_total:.2f}"],
-        ["Travel Total", f"€{travel_total:.2f}"],
-        ["Net Salary", f"€{net_total:.2f}"],
+    # ===== Employee Info Table =====
+    employee_data = [
+        ["Employee Name:", employee_name],
+        ["Employee ID:", employee_id],
+        ["Generated On:", datetime.now().strftime("%d-%m-%Y")],
     ]
 
-    summary_table = Table(summary_data, colWidths=[200, 150])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-        ('FONTSIZE', (0,0), (-1,-1), 10),
+    employee_table = Table(employee_data, colWidths=[2.5 * inch, 3 * inch])
+    employee_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
     ]))
 
-    elements.append(summary_table)
+    elements.append(employee_table)
+    elements.append(Spacer(1, 0.4 * inch))
+
+    # ===== Work Details Table =====
+    work_data = [
+        ["Start Time", start_time],
+        ["End Time", end_time],
+        ["Total Working Hours", f"{total_hours} hrs"],
+        ["Hourly Rate", f"€ {hourly_rate:.2f}"],
+        ["Gross Salary", f"€ {gross_salary:.2f}"],
+        ["Tax (%)", f"{tax_percent}%"],
+        ["Tax Amount", f"€ {tax_amount:.2f}"],
+        ["Net Salary", f"€ {net_salary:.2f}"],
+    ]
+
+    work_table = Table(work_data, colWidths=[2.5 * inch, 3 * inch])
+    work_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.beige),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("ROWHEIGHT", (0, 0), (-1, -1), 20),
+    ]))
+
+    elements.append(work_table)
     elements.append(Spacer(1, 0.5 * inch))
 
-    # ---- FULL DAILY TABLE ----
-    table_data = [[
-        "Date", "Day", "Start", "End", "Break",
-        "Hours", "Gross", "Bonus", "Travel",
-        "Tax", "Net", "Notes"
-    ]]
+    # ===== Footer =====
+    footer_style = ParagraphStyle(
+        name='Footer',
+        fontSize=10,
+        textColor=colors.grey
+    )
 
-    for _, row in df_month.iterrows():
-        table_data.append([
-            str(row.get("date", "")),
-            str(row.get("day", "")),
-            str(row.get("start_time", "")),
-            str(row.get("end_time", "")),
-            f"{row.get('break_hours', 0):.2f}",
-            f"{row.get('working_hours', 0):.2f}",
-            f"€{row.get('gross_hourly', 0):.2f}",
-            f"€{row.get('bonus', 0):.2f}",
-            f"€{row.get('travel_eur', 0):.2f}",
-            f"€{row.get('tax', 0):.2f}",
-            f"€{row.get('net_pay', 0):.2f}",
-            str(row.get("notes", ""))[:20]  # prevent overflow
-        ])
+    elements.append(Paragraph("This is a system-generated payslip.", footer_style))
 
-    daily_table = Table(table_data, repeatRows=1)
-    daily_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0b5ed7")),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-        ('GRID', (0,0), (-1,-1), 0.3, colors.grey),
-        ('FONTSIZE', (0,0), (-1,-1), 8),
-        ('ALIGN', (5,1), (10,-1), 'RIGHT'),
-    ]))
-
-    elements.append(daily_table)
-
+    # Build PDF
     doc.build(elements)
-    buffer.seek(0)
-    return buffer
 
+    print(f"Payslip generated successfully: {output_filename}")
 # def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, company_name="MUL Company"):
 #     """
 #     Generates a branded payslip PDF for month (DataFrame df_month).
