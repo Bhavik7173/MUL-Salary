@@ -24,7 +24,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 from datetime import datetime
-from pdf_utils import generate_payslip_pdf_bytes
+# from pdf_utils import generate_payslip_pdf_bytes
 
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle,
@@ -312,6 +312,7 @@ def generate_payslip_pdf(
     doc.build(elements)
 
     print(f"Payslip generated successfully: {output_filename}")
+
 # def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, company_name="MUL Company"):
 #     """
 #     Generates a branded payslip PDF for month (DataFrame df_month).
@@ -831,7 +832,7 @@ with tabs[2]:
                     if df_m.empty:
                         st.warning("No data this month to generate payslip.")
                     else:
-                        pdf_buf = generate_payslip_pdf_bytes(df_m, year, month, logo_path=LOGO_PATH)
+                        pdf_buf = generate_payslip_pdf(df_m, year, month, logo_path=LOGO_PATH)
                         st.download_button("Download Payslip PDF", data=pdf_buf, file_name=f"payslip_{year}_{month:02d}.pdf", mime="application/pdf")
 
             with col_e2:
@@ -841,7 +842,7 @@ with tabs[2]:
                     elif df_m.empty:
                         st.error("No data for this month to send.")
                     else:
-                        pdf_buf = generate_payslip_pdf_bytes(df_m, year, month, logo_path=LOGO_PATH)
+                        pdf_buf = generate_payslip_pdf(df_m, year, month, logo_path=LOGO_PATH)
                         ok, err = send_email_with_attachment(email_to.strip(), f"MUL Payslip {year}-{month:02d}", html,
                                                             attachment_bytes=pdf_buf, attachment_name=f"payslip_{year}_{month:02d}.pdf")
                         if ok:
