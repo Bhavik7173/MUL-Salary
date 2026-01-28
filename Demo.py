@@ -48,7 +48,7 @@ LOGO_PATH = "logo.png"
 TAX_RATE = 0.2764
 CONTRACT_HOURS = 151.67
 BONUS_AMOUNT = 6.0
-INITIAL_AZK=65.77
+# INITIAL_AZK=65.77
 
 # default sender fallback (prefer user to set via Settings tab)
 DEFAULT_SENDER_EMAIL = ""
@@ -565,6 +565,7 @@ tabs = st.tabs(["Daily Entry", "Upload Excel/CSV", "Monthly Summary", "Settings"
 # ---- DAILY ENTRY TAB ----
 with tabs[0]:
     st.header("Daily Entry")
+    INITIAL_AZK = st.number_input("Over Time Hours", value=0.00)
     HOURLY_RATE = st.number_input("Hourly Rate (€)", value=14.53)
     col1, col2, col3 = st.columns(3)
     with col1:
