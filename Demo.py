@@ -24,6 +24,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 from datetime import datetime
+import hashlib
 # from pdf_utils import generate_payslip_pdf_bytes
 
 from reportlab.platypus import (
@@ -65,6 +66,9 @@ def load_settings():
             return {}
     return {}
 
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
 def save_settings(obj):
     with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2)
@@ -72,20 +76,28 @@ def save_settings(obj):
 settings = load_settings()
 
 def ensure_storage():
-    if not os.path.exists(CSV_PATH):
-        df = pd.DataFrame(columns=[
-            "id",  # 👈 NEW
-            "date","day","public_holiday","start_time","end_time","break_hours",
-            "working_hours","bonus","travel_eur","gross_pay","tax","net_pay","gross_hourly",
-            "source","notes"
-        ])
-        df.to_csv(CSV_PATH, index=False)
     engine = create_engine(f"sqlite:///{SQLITE_PATH}", echo=False)
+
     with engine.connect() as conn:
+
+        # USERS TABLE
+        if not engine.dialect.has_table(conn, "users"):
+            users_df = pd.DataFrame(columns=["id", "email", "password_hash"])
+            users_df.to_sql("users", conn, index=False, if_exists="replace")
+
+        # DAILY RECORDS TABLE
         if not engine.dialect.has_table(conn, TABLE_NAME):
-            df = pd.read_csv(CSV_PATH)
+            df = pd.DataFrame(columns=[
+                "id",
+                "user_id",   # ✅ NEW COLUMN
+                "date","day","public_holiday","start_time","end_time","break_hours",
+                "working_hours","bonus","travel_eur","gross_pay","tax","net_pay","gross_hourly",
+                "source","notes"
+            ])
             df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
+
     return engine
+
 
 def parse_time(t):
     if pd.isna(t) or t == "":
@@ -448,7 +460,7 @@ def try_auto_send_on_start():
     )
     html = build_email_html(summary)
     # PDF
-    pdf_bytes = generate_payslip_pdf_bytes(df_m, today.year, today.month, logo_path=LOGO_PATH)
+    pdf_bytes = generate_payslip_pdf(df_m, today.year, today.month, logo_path=LOGO_PATH)
     ok, err = send_email_with_attachment(recipient, f"MUL Salary Summary {today.year}-{today.month:02d}", html,
                                         attachment_bytes=pdf_bytes)
     if ok:
@@ -458,12 +470,72 @@ def try_auto_send_on_start():
 # Try auto-send on app start (opt-in only)
 try_auto_send_on_start()
 
+# ---------------- AUTH SYSTEM ----------------
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+def login_page():
+    st.title("MUL Salary Tracker - Login")
+
+    tab1, tab2 = st.tabs(["Login", "Register"])
+
+    with tab1:
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            df_users = pd.read_sql_table("users", engine)
+
+            user = df_users[
+                (df_users["email"] == email) &
+                (df_users["password_hash"] == hash_password(password))
+            ]
+
+            if not user.empty:
+                st.session_state.user = user.iloc[0].to_dict()
+                st.success("Login successful")
+                st.rerun()
+            else:
+                st.error("Invalid email or password")
+
+    with tab2:
+        email = st.text_input("Register Email")
+        password = st.text_input("Register Password", type="password")
+
+        if st.button("Create Account"):
+            df_users = pd.read_sql_table("users", engine)
+
+            if email in df_users["email"].values:
+                st.error("User already exists")
+            else:
+                new_user = {
+                    "id": len(df_users) + 1,
+                    "email": email,
+                    "password_hash": hash_password(password)
+                }
+                df_users = pd.concat([df_users, pd.DataFrame([new_user])])
+                df_users.to_sql("users", engine, if_exists="replace", index=False)
+                st.success("Account created. Please login.")
+
+
 # ---------------- INITIALIZE STORAGE ----------------
 engine = ensure_storage()
+
+if st.session_state.user is None:
+    login_page()
+    st.stop()
+
 
 # ---------------- UI ----------------
 st.title("MUL Salary Tracker (Streamlit) — Branded Payslip & Email")
 st.markdown("Enter daily work data, upload Excel/CSV, or import CSV. App calculates hours, AZK, tax, bonus and summary.")
+
+if st.sidebar.button("Logout"):
+    st.session_state.user = None
+    st.rerun()
+
+
 # dark mode toggle (simple CSS)
 if settings.get("dark_mode", False):
     dark = True
@@ -511,13 +583,15 @@ with tabs[0]:
     # ---- SAVE DAY ----
     if st.button("Save Day"):
         df = ensure_id_column(load_data(engine))
-
+        df = df[df["user_id"] == st.session_state.user["id"]]
+        
         if "id" not in df.columns:
             df["id"] = []
 
         new_id = int(df["id"].max() + 1) if not df.empty else 1
 
         row = {
+            "user_id": st.session_state.user["id"],  # ✅ IMPORTANT
             "id": new_id,
             "date": date_input,
             "day": date_input.strftime("%A"),
@@ -550,7 +624,8 @@ with tabs[0]:
     st.subheader("✏️ Edit / Delete Records")
 
     df = ensure_id_column(load_data(engine))
-
+    df = df[df["user_id"] == st.session_state.user["id"]]
+    
     if df.empty:
         st.info("No data available.")
     else:
@@ -616,6 +691,7 @@ with tabs[0]:
 with tabs[1]:
     st.header("Upload Excel or CSV")
     st.markdown("Upload a file with columns: Date, Start Time, End Time, Break (hours), Public Holiday (Y/N), Travel (€), Notes")
+    row["user_id"] = st.session_state.user["id"]
     uploaded = st.file_uploader("Upload Excel (.xlsx) or CSV", type=["xlsx","csv"])
     if uploaded is not None:
         try:
@@ -674,6 +750,7 @@ with tabs[1]:
                     processed.append(row)
                 new_df = pd.DataFrame(processed)
                 df = ensure_id_column(load_data(engine))
+                df = df[df["user_id"] == st.session_state.user["id"]]                
                 for d in new_df['date'].unique():
                     df = df[df['date'] != pd.to_datetime(d).date()]
                 df = pd.concat([df, new_df], ignore_index=True, sort=False)
@@ -686,6 +763,7 @@ with tabs[1]:
 with tabs[2]:
     st.header("Monthly Summary & Payslip")
     df = ensure_id_column(load_data(engine))
+    df = df[df["user_id"] == st.session_state.user["id"]]    
     if df.empty:
         st.info("No records yet. Add data via Daily Entry or Upload.")
     else:
