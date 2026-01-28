@@ -592,8 +592,9 @@ with tabs[0]:
         new_id = int(df["id"].max() + 1) if not df.empty else 1
 
         row = {
-            "user_id": st.session_state.user["id"],  # ✅ IMPORTANT
+            
             "id": new_id,
+            "user_id": st.session_state.user["id"],  # ✅ IMPORTANT
             "date": date_input,
             "day": date_input.strftime("%A"),
             "public_holiday": "Y" if public_holiday else "N",
