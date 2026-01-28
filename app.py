@@ -36,7 +36,7 @@ from twilio.rest import Client
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
+import hashlib
 
 # ---- CONFIG ----
 CSV_PATH = "work_log.csv"        # local CSV (will be created in running folder)
@@ -47,31 +47,70 @@ TAX_RATE = 0.2764
 CONTRACT_HOURS = 151.67
 BONUS_AMOUNT = 6.0
 
-tw_sid = "ACa784d95bb8df4036d7c7b6a8df6e478c"
-tw_token = "cb1de20d421f56c9dcecbed3842a8b55"
-tw_from = "+14155238886"
-wa_token = "EAANXBTTBzQcBP78A5a7v3anBqPGUhIY75ZA5KQkfVvhHTxUfOrscLGHFwaJi7ahQ6t3osc9njiszBUk9Dy1A7I1v92Y6hegScml4ZBy9OnZA3kxZCgBLOZCZBnah5ZAASbBxfWErmvOHF4BgfVETF3wS7RhEJhFhnQd1oqtohPwA9T4lnePQZAZCoi8lxBTXVEUQaAZC84UZCGZCAx7qtEdle5F9JPSkCmPA2vacUb8YPmImOC6ClgPgXR5IMCytwBIMMP0guYN4Mb156ZB9YDOMFzZAa6cwtTEUf3NVTJRIBqdgZDZD"
-wa_phone_id = "795690100304535"
+# tw_sid = "ACa784d95bb8df4036d7c7b6a8df6e478c"
+# tw_token = "cb1de20d421f56c9dcecbed3842a8b55"
+# tw_from = "+14155238886"
+# wa_token = "EAANXBTTBzQcBP78A5a7v3anBqPGUhIY75ZA5KQkfVvhHTxUfOrscLGHFwaJi7ahQ6t3osc9njiszBUk9Dy1A7I1v92Y6hegScml4ZBy9OnZA3kxZCgBLOZCZBnah5ZAASbBxfWErmvOHF4BgfVETF3wS7RhEJhFhnQd1oqtohPwA9T4lnePQZAZCoi8lxBTXVEUQaAZC84UZCGZCAx7qtEdle5F9JPSkCmPA2vacUb8YPmImOC6ClgPgXR5IMCytwBIMMP0guYN4Mb156ZB9YDOMFzZAa6cwtTEUf3NVTJRIBqdgZDZD"
+# wa_phone_id = "795690100304535"
+
+
+tw_sid = os.getenv("TWILIO_SID")
+tw_token = os.getenv("TWILIO_TOKEN")
+tw_from = os.getenv("TWILIO_FROM")
+
+wa_token = os.getenv("WA_TOKEN")
+wa_phone_id = os.getenv("WA_PHONE_ID")
+
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
 
 
 st.set_page_config(page_title="MUL Salary Tracker", layout="wide")
 
 # ---- UTILITIES ----
+# def ensure_storage():
+#     # ensure CSV exists
+#     if not os.path.exists(CSV_PATH):
+#         df = pd.DataFrame(columns=[
+#             "date","day","public_holiday","start_time","end_time","break_hours",
+#             "working_hours","bonus","travel_eur","gross_pay","tax","net_pay","gross_hourly","source","notes"
+#         ])
+#         df.to_csv(CSV_PATH, index=False)
+#     # ensure sqlite table exists
+#     engine = create_engine(f"sqlite:///{SQLITE_PATH}", echo=False)
+#     with engine.connect() as conn:
+#         if not engine.dialect.has_table(conn, TABLE_NAME):
+#             df = pd.read_csv(CSV_PATH)
+#             df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
+#     return engine
+
 def ensure_storage():
-    # ensure CSV exists
-    if not os.path.exists(CSV_PATH):
-        df = pd.DataFrame(columns=[
-            "date","day","public_holiday","start_time","end_time","break_hours",
-            "working_hours","bonus","travel_eur","gross_pay","tax","net_pay","gross_hourly","source","notes"
-        ])
-        df.to_csv(CSV_PATH, index=False)
-    # ensure sqlite table exists
     engine = create_engine(f"sqlite:///{SQLITE_PATH}", echo=False)
+
     with engine.connect() as conn:
+
+        # USERS TABLE
+        if not engine.dialect.has_table(conn, "users"):
+            users_df = pd.DataFrame(columns=["id", "email", "password_hash"])
+            users_df.to_sql("users", conn, index=False, if_exists="replace")
+
+        # DAILY RECORDS TABLE
         if not engine.dialect.has_table(conn, TABLE_NAME):
-            df = pd.read_csv(CSV_PATH)
+            df = pd.DataFrame(columns=[
+                "id",
+                "user_id",  # IMPORTANT
+                "date","day","public_holiday","start_time","end_time",
+                "break_hours","working_hours","bonus","travel_eur",
+                "gross_pay","tax","net_pay","gross_hourly",
+                "source","notes"
+            ])
             df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
+
     return engine
+
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
 def parse_time(t):
     if pd.isna(t) or t == "":
@@ -174,17 +213,67 @@ def save_to_storage(df, engine=None):
     with engine.connect() as conn:
         df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
 
+def login_page(engine):
+    st.title("Login - MUL Salary Tracker")
+
+    tab1, tab2 = st.tabs(["Login", "Register"])
+
+    with tab1:
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            df_users = pd.read_sql_table("users", engine)
+            user = df_users[
+                (df_users["email"] == email) &
+                (df_users["password_hash"] == hash_password(password))
+            ]
+            if not user.empty:
+                st.session_state.user = user.iloc[0].to_dict()
+                st.success("Login successful")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
+    with tab2:
+        email = st.text_input("Register Email")
+        password = st.text_input("Register Password", type="password")
+
+        if st.button("Create Account"):
+            df_users = pd.read_sql_table("users", engine)
+            if email in df_users["email"].values:
+                st.error("User already exists")
+            else:
+                new_user = {
+                    "id": len(df_users) + 1,
+                    "email": email,
+                    "password_hash": hash_password(password)
+                }
+                df_users = pd.concat([df_users, pd.DataFrame([new_user])])
+                df_users.to_sql("users", engine, if_exists="replace", index=False)
+                st.success("Account created. Please login.")
+
 
 
 # ---- INITIALIZE STORAGE ----
 engine = ensure_storage()
 
-
+if st.session_state.user is None:
+    login_page(engine)
+    st.stop()
+    
+if st.sidebar.button("Logout"):
+    st.session_state.user = None
+    st.rerun()
 # ---- UI ----
 st.title("MUL Salary Tracker (Streamlit)")
 st.markdown("Enter daily work data, upload Excel/CSV, or import CSV. App calculates hours, AZK, tax, bonus and summary.")
 
 tabs = st.tabs(["Daily Entry", "Upload Excel/CSV", "Monthly Summary", "Settings", "CRUD (Edit/Delete)"])
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+
 
 # ---- DAILY ENTRY TAB ----
 with tabs[0]:
@@ -204,6 +293,7 @@ with tabs[0]:
 
     if save_btn:
         row = {
+            "user_id": st.session_state.user["id"],
             "date": date_input,
             "day": date_input.strftime("%A"),
             "public_holiday": "Y" if public_holiday else "N",
@@ -225,6 +315,8 @@ with tabs[0]:
             "gross_hourly": gross_hourly
         })
         df = load_data(engine)
+        df = df[df["user_id"] == st.session_state.user["id"]]
+        
         # Replace append with concat
         df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
         save_to_storage(df, engine)
@@ -234,6 +326,8 @@ with tabs[0]:
     st.markdown("---")
     st.subheader("This month's entries (editable via CSV/DB)")
     df = load_data(engine)
+    df = df[df["user_id"] == st.session_state.user["id"]]
+    
     if not df.empty:
         current_month = datetime.today().month
         df['date'] = pd.to_datetime(df['date']).dt.date
@@ -305,6 +399,8 @@ with tabs[1]:
                     processed.append(row)
                 new_df = pd.DataFrame(processed)
                 df = load_data(engine)
+                df = df[df["user_id"] == st.session_state.user["id"]]
+                
                 for d in new_df['date'].unique():
                     df = df[df['date'] != pd.to_datetime(d).date()]
                 df = pd.concat([df, new_df], ignore_index=True, sort=False)
@@ -317,6 +413,8 @@ with tabs[1]:
 with tabs[2]:
     st.header("Monthly Summary & Payslip")
     df = load_data(engine)
+    df = df[df["user_id"] == st.session_state.user["id"]]
+    
     if df.empty:
         st.info("No records yet. Add data via Daily Entry or Upload.")
     else:
@@ -431,6 +529,7 @@ with tabs[4]:
     st.header("Manage Records (CRUD Operations)")
 
     df = load_data(engine)
+    df = df[df["user_id"] == st.session_state.user["id"]]
 
     if df.empty:
         st.info("No records found.")
