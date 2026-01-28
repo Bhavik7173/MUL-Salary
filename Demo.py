@@ -691,7 +691,7 @@ with tabs[0]:
 with tabs[1]:
     st.header("Upload Excel or CSV")
     st.markdown("Upload a file with columns: Date, Start Time, End Time, Break (hours), Public Holiday (Y/N), Travel (€), Notes")
-    row["user_id"] = st.session_state.user["id"]
+    
     uploaded = st.file_uploader("Upload Excel (.xlsx) or CSV", type=["xlsx","csv"])
     if uploaded is not None:
         try:
@@ -728,6 +728,7 @@ with tabs[1]:
                 processed = []
                 for _, r in uploaded_df.iterrows():
                     row = {}
+                    row["user_id"] = st.session_state.user["id"]
                     row['date'] = pd.to_datetime(r.get('date')).date()
                     row['day'] = row['date'].strftime("%A")
                     row['public_holiday'] = ("Y" if str(r.get('public_holiday')).strip().upper() in ["Y","YES","TRUE","1"] else "N")
