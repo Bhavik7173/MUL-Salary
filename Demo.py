@@ -163,11 +163,25 @@ def ensure_id_column(df):
     df["id"] = df["id"].astype(int)
     return df
 
-def save_to_storage(df, engine=None):
-    df.to_csv(CSV_PATH, index=False)
+def save_to_storage(user_df, engine=None):
     engine = engine or create_engine(f"sqlite:///{SQLITE_PATH}")
+
     with engine.connect() as conn:
-        df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
+        try:
+            full_df = pd.read_sql_table(TABLE_NAME, conn)
+        except:
+            full_df = pd.DataFrame()
+
+        if not full_df.empty and "user_id" in full_df.columns:
+            # remove only current user's records
+            user_id = user_df["user_id"].iloc[0]
+            full_df = full_df[full_df["user_id"] != user_id]
+
+        # append updated user data
+        final_df = pd.concat([full_df, user_df], ignore_index=True)
+
+        final_df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
+
 
 def calculate_azk_bank(df, target_year, target_month, initial_azk=0.0):
     df = df.copy()
@@ -522,18 +536,24 @@ def login_page():
 # ---------------- INITIALIZE STORAGE ----------------
 engine = ensure_storage()
 
+# --- AUTH SESSION INIT ---
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+# --- LOGIN BLOCK ---
 if st.session_state.user is None:
     login_page()
     st.stop()
-
+    
+if st.sidebar.button("Logout"):
+    st.session_state.clear()
+    st.rerun()
 
 # ---------------- UI ----------------
 st.title("MUL Salary Tracker (Streamlit) — Branded Payslip & Email")
 st.markdown("Enter daily work data, upload Excel/CSV, or import CSV. App calculates hours, AZK, tax, bonus and summary.")
 
-if st.sidebar.button("Logout"):
-    st.session_state.user = None
-    st.rerun()
+
 
 
 # dark mode toggle (simple CSS)
