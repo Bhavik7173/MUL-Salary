@@ -1,6 +1,3 @@
-Correction of this code.
-
-
 import streamlit as st
 import pandas as pd
 import os
