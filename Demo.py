@@ -1,3 +1,5 @@
+Correction of this code.
+
 
 import streamlit as st
 import pandas as pd
@@ -24,7 +26,6 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 from datetime import datetime
-import hashlib
 # from pdf_utils import generate_payslip_pdf_bytes
 
 from reportlab.platypus import (
@@ -48,7 +49,7 @@ LOGO_PATH = "logo.png"
 TAX_RATE = 0.2764
 CONTRACT_HOURS = 151.67
 BONUS_AMOUNT = 6.0
-# INITIAL_AZK=65.77
+INITIAL_AZK=65.77
 
 # default sender fallback (prefer user to set via Settings tab)
 DEFAULT_SENDER_EMAIL = ""
@@ -66,9 +67,6 @@ def load_settings():
             return {}
     return {}
 
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
 def save_settings(obj):
     with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2)
@@ -76,28 +74,20 @@ def save_settings(obj):
 settings = load_settings()
 
 def ensure_storage():
+    if not os.path.exists(CSV_PATH):
+        df = pd.DataFrame(columns=[
+            "id",  # 👈 NEW
+            "date","day","public_holiday","start_time","end_time","break_hours",
+            "working_hours","bonus","travel_eur","gross_pay","tax","net_pay","gross_hourly",
+            "source","notes"
+        ])
+        df.to_csv(CSV_PATH, index=False)
     engine = create_engine(f"sqlite:///{SQLITE_PATH}", echo=False)
-
     with engine.connect() as conn:
-
-        # USERS TABLE
-        if not engine.dialect.has_table(conn, "users"):
-            users_df = pd.DataFrame(columns=["id", "email", "password_hash"])
-            users_df.to_sql("users", conn, index=False, if_exists="replace")
-
-        # DAILY RECORDS TABLE
         if not engine.dialect.has_table(conn, TABLE_NAME):
-            df = pd.DataFrame(columns=[
-                "id",
-                "user_id",   # ✅ NEW COLUMN
-                "date","day","public_holiday","start_time","end_time","break_hours",
-                "working_hours","bonus","travel_eur","gross_pay","tax","net_pay","gross_hourly",
-                "source","notes"
-            ])
+            df = pd.read_csv(CSV_PATH)
             df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
-
     return engine
-
 
 def parse_time(t):
     if pd.isna(t) or t == "":
@@ -163,25 +153,11 @@ def ensure_id_column(df):
     df["id"] = df["id"].astype(int)
     return df
 
-def save_to_storage(user_df, engine=None):
+def save_to_storage(df, engine=None):
+    df.to_csv(CSV_PATH, index=False)
     engine = engine or create_engine(f"sqlite:///{SQLITE_PATH}")
-
     with engine.connect() as conn:
-        try:
-            full_df = pd.read_sql_table(TABLE_NAME, conn)
-        except:
-            full_df = pd.DataFrame()
-
-        if not full_df.empty and "user_id" in full_df.columns:
-            # remove only current user's records
-            user_id = user_df["user_id"].iloc[0]
-            full_df = full_df[full_df["user_id"] != user_id]
-
-        # append updated user data
-        final_df = pd.concat([full_df, user_df], ignore_index=True)
-
-        final_df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
-
+        df.to_sql(TABLE_NAME, conn, index=False, if_exists="replace")
 
 def calculate_azk_bank(df, target_year, target_month, initial_azk=0.0):
     df = df.copy()
@@ -257,84 +233,87 @@ def send_email_with_attachment(to_email, subject, html_body, attachment_bytes=No
         return False, str(e)
 
 # ---------------- PDF Payslip generation (Option C: Branded) ----------------
-def generate_payslip_pdf(df_month, year, month, logo_path=None, company_name="MUL Company"):
-    """
-    Generate branded monthly payslip PDF from DataFrame.
-    Returns: BytesIO
-    """
+def generate_payslip_pdf(
+        employee_name,
+        employee_id,
+        start_time,
+        end_time,
+        total_hours,
+        hourly_rate,
+        tax_percent,
+        output_filename="payslip.pdf"
+):
+    # Create PDF document
+    doc = SimpleDocTemplate(
+        output_filename,
+        pagesize=pagesizes.A4
+    )
 
-    from io import BytesIO
-    buf = BytesIO()
-
-    doc = SimpleDocTemplate(buf, pagesize=A4)
     elements = []
     styles = getSampleStyleSheet()
 
     # ===== Title =====
-    title = Paragraph(f"<b>{company_name} - Payslip ({year}-{month:02d})</b>", styles["Heading1"])
-    elements.append(title)
-    elements.append(Spacer(1, 12))
+    title_style = styles["Heading1"]
+    elements.append(Paragraph("Salary Payslip", title_style))
+    elements.append(Spacer(1, 0.3 * inch))
 
-    # ===== Monthly Calculations =====
-    total_hours = df_month['working_hours'].sum()
-    payable_hours = min(total_hours, CONTRACT_HOURS)
+    # ===== Calculate Salary =====
+    gross_salary = total_hours * hourly_rate
+    tax_amount = gross_salary * (tax_percent / 100)
+    net_salary = gross_salary - tax_amount
 
-    bonus_total = df_month.get('bonus', pd.Series([0])).sum()
-    travel_total = df_month.get('travel_eur', pd.Series([0])).sum()
+    # ===== Employee Info Table =====
+    employee_data = [
+        ["Employee Name:", employee_name],
+        ["Generated On:", datetime.now().strftime("%d-%m-%Y")],
+    ]
 
-    gross_salary = payable_hours * HOURLY_RATE
-    tax_amount = gross_salary * TAX_RATE
-    net_salary = gross_salary - tax_amount + bonus_total + travel_total
+    employee_table = Table(employee_data, colWidths=[2.5 * inch, 3 * inch])
+    employee_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+    ]))
 
-    summary_data = [
-        ["Total Worked Hours", f"{total_hours:.2f} h"],
-        ["Payable Hours", f"{payable_hours:.2f} h"],
+    elements.append(employee_table)
+    elements.append(Spacer(1, 0.4 * inch))
+
+    # ===== Work Details Table =====
+    work_data = [
+        ["Start Time", start_time],
+        ["End Time", end_time],
+        ["Total Working Hours", f"{total_hours} hrs"],
+        ["Hourly Rate", f"€ {hourly_rate:.2f}"],
         ["Gross Salary", f"€ {gross_salary:.2f}"],
-        ["Tax", f"€ {tax_amount:.2f}"],
-        ["Bonus", f"€ {bonus_total:.2f}"],
-        ["Travel", f"€ {travel_total:.2f}"],
+        ["Tax (%)", f"{tax_percent}%"],
+        ["Tax Amount", f"€ {tax_amount:.2f}"],
         ["Net Salary", f"€ {net_salary:.2f}"],
     ]
 
-    summary_table = Table(summary_data, colWidths=[200, 200])
-    summary_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+    work_table = Table(work_data, colWidths=[2.5 * inch, 3 * inch])
+    work_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.beige),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("ROWHEIGHT", (0, 0), (-1, -1), 20),
     ]))
 
-    elements.append(summary_table)
-    elements.append(Spacer(1, 20))
+    elements.append(work_table)
+    elements.append(Spacer(1, 0.5 * inch))
 
-    # ===== Daily Breakdown Table =====
-    table_data = [["Date", "Start", "End", "Hours", "Gross", "Tax"]]
+    # ===== Footer =====
+    footer_style = ParagraphStyle(
+        name='Footer',
+        fontSize=10,
+        textColor=colors.grey
+    )
 
-    for _, r in df_month.iterrows():
-        table_data.append([
-            str(r.get("date", "")),
-            str(r.get("start_time", "")),
-            str(r.get("end_time", "")),
-            f"{r.get('working_hours', 0):.2f}",
-            f"€{r.get('gross_hourly', 0):.2f}",
-            f"€{r.get('tax', 0):.2f}",
-        ])
+    elements.append(Paragraph("This is a system-generated payslip.", footer_style))
 
-    daily_table = Table(table_data, repeatRows=1)
-    daily_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-    ]))
-
-    elements.append(daily_table)
-
-    elements.append(Spacer(1, 20))
-    elements.append(Paragraph("Generated by MUL Salary Tracker", styles["Normal"]))
-
+    # Build PDF
     doc.build(elements)
 
-    buf.seek(0)
-    return buf
-
+    print(f"Payslip generated successfully: {output_filename}")
 
 # def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, company_name="MUL Company"):
 #     """
@@ -484,77 +463,12 @@ def try_auto_send_on_start():
 # Try auto-send on app start (opt-in only)
 try_auto_send_on_start()
 
-# ---------------- AUTH SYSTEM ----------------
-
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-def login_page():
-    st.title("MUL Salary Tracker - Login")
-
-    tab1, tab2 = st.tabs(["Login", "Register"])
-
-    with tab1:
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-
-        if st.button("Login"):
-            df_users = pd.read_sql_table("users", engine)
-
-            user = df_users[
-                (df_users["email"] == email) &
-                (df_users["password_hash"] == hash_password(password))
-            ]
-
-            if not user.empty:
-                st.session_state.user = user.iloc[0].to_dict()
-                st.success("Login successful")
-                st.rerun()
-            else:
-                st.error("Invalid email or password")
-
-    with tab2:
-        email = st.text_input("Register Email")
-        password = st.text_input("Register Password", type="password")
-
-        if st.button("Create Account"):
-            df_users = pd.read_sql_table("users", engine)
-
-            if email in df_users["email"].values:
-                st.error("User already exists")
-            else:
-                new_user = {
-                    "id": len(df_users) + 1,
-                    "email": email,
-                    "password_hash": hash_password(password)
-                }
-                df_users = pd.concat([df_users, pd.DataFrame([new_user])])
-                df_users.to_sql("users", engine, if_exists="replace", index=False)
-                st.success("Account created. Please login.")
-
-
 # ---------------- INITIALIZE STORAGE ----------------
 engine = ensure_storage()
-
-# --- AUTH SESSION INIT ---
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-# --- LOGIN BLOCK ---
-if st.session_state.user is None:
-    login_page()
-    st.stop()
-    
-if st.sidebar.button("Logout"):
-    st.session_state.clear()
-    st.rerun()
 
 # ---------------- UI ----------------
 st.title("MUL Salary Tracker (Streamlit) — Branded Payslip & Email")
 st.markdown("Enter daily work data, upload Excel/CSV, or import CSV. App calculates hours, AZK, tax, bonus and summary.")
-
-
-
 
 # dark mode toggle (simple CSS)
 if settings.get("dark_mode", False):
@@ -585,7 +499,6 @@ tabs = st.tabs(["Daily Entry", "Upload Excel/CSV", "Monthly Summary", "Settings"
 # ---- DAILY ENTRY TAB ----
 with tabs[0]:
     st.header("Daily Entry")
-    INITIAL_AZK = st.number_input("Over Time Hours", value=0.00)
     HOURLY_RATE = st.number_input("Hourly Rate (€)", value=14.53)
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -604,17 +517,14 @@ with tabs[0]:
     # ---- SAVE DAY ----
     if st.button("Save Day"):
         df = ensure_id_column(load_data(engine))
-        df = df[df["user_id"] == st.session_state.user["id"]]
-        
+
         if "id" not in df.columns:
             df["id"] = []
 
         new_id = int(df["id"].max() + 1) if not df.empty else 1
 
         row = {
-            
             "id": new_id,
-            "user_id": st.session_state.user["id"],  # ✅ IMPORTANT
             "date": date_input,
             "day": date_input.strftime("%A"),
             "public_holiday": "Y" if public_holiday else "N",
@@ -646,8 +556,7 @@ with tabs[0]:
     st.subheader("✏️ Edit / Delete Records")
 
     df = ensure_id_column(load_data(engine))
-    df = df[df["user_id"] == st.session_state.user["id"]]
-    
+
     if df.empty:
         st.info("No data available.")
     else:
@@ -713,7 +622,6 @@ with tabs[0]:
 with tabs[1]:
     st.header("Upload Excel or CSV")
     st.markdown("Upload a file with columns: Date, Start Time, End Time, Break (hours), Public Holiday (Y/N), Travel (€), Notes")
-    
     uploaded = st.file_uploader("Upload Excel (.xlsx) or CSV", type=["xlsx","csv"])
     if uploaded is not None:
         try:
@@ -750,7 +658,6 @@ with tabs[1]:
                 processed = []
                 for _, r in uploaded_df.iterrows():
                     row = {}
-                    row["user_id"] = st.session_state.user["id"]
                     row['date'] = pd.to_datetime(r.get('date')).date()
                     row['day'] = row['date'].strftime("%A")
                     row['public_holiday'] = ("Y" if str(r.get('public_holiday')).strip().upper() in ["Y","YES","TRUE","1"] else "N")
@@ -773,7 +680,6 @@ with tabs[1]:
                     processed.append(row)
                 new_df = pd.DataFrame(processed)
                 df = ensure_id_column(load_data(engine))
-                df = df[df["user_id"] == st.session_state.user["id"]]                
                 for d in new_df['date'].unique():
                     df = df[df['date'] != pd.to_datetime(d).date()]
                 df = pd.concat([df, new_df], ignore_index=True, sort=False)
@@ -786,7 +692,6 @@ with tabs[1]:
 with tabs[2]:
     st.header("Monthly Summary & Payslip")
     df = ensure_id_column(load_data(engine))
-    df = df[df["user_id"] == st.session_state.user["id"]]    
     if df.empty:
         st.info("No records yet. Add data via Daily Entry or Upload.")
     else:
