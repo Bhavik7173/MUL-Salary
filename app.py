@@ -189,9 +189,13 @@ def send_whatsapp_twilio(account_sid, auth_token, from_whatsapp, to_whatsapp, bo
     return msg.sid
 
 def send_email(to_email, subject, body):
-    sender_email = "mrbhavik2711@gmail.com"
-    sender_password = "sygw sbsh mqua jrwd".replace(" ", "")  # Use App Password, not normal login password
-    
+    sender_email = os.getenv("EMAIL_USER")
+    sender_password = os.getenv("EMAIL_PASS")
+
+    if not sender_email or not sender_password:
+        st.error("Email credentials not configured.")
+        return False
+
     msg = MIMEMultipart()
     msg["From"] = sender_email
     msg["To"] = to_email
@@ -203,9 +207,10 @@ def send_email(to_email, subject, body):
             server.starttls()
             server.login(sender_email, sender_password)
             server.send_message(msg)
-        print(f"✅ Email sent to {to_email}")
+        return True
     except Exception as e:
-        print(f"❌ Email failed: {e}")
+        st.error(f"Email failed: {e}")
+        return False
 
 def save_to_storage(df, engine=None):
     df.to_csv(CSV_PATH, index=False)

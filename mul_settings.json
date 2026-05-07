@@ -2,6 +2,9 @@
   "dark_mode": true,
   "auto_email": {
     "enabled": true,
-    "day": 2
-  }
+    "day": 2,
+    "recipient": "bhavikpatel7173@gmail.com"
+  },
+  "sender_email": "mrbhavik2711@gmail.com",
+  "sender_password": "jptg mciw wdxi amkg"
 }

@@ -198,209 +198,218 @@ def build_email_html(summary, company_name="MUL Company"):
     """
     return html
 
-def send_email_with_attachment(to_email, subject, html_body, attachment_bytes=None, attachment_name="payslip.pdf",
-                               sender_email=None, sender_password=None):
-    sender_email = sender_email or st.secrets["SENDER_EMAIL"]
-    sender_password = sender_password or st.secrets["SENDER_PASSWORD"]
+def send_email_with_attachment(
+    to_email,
+    subject,
+    html_body,
+    attachment_bytes=None,
+    attachment_name="payslip.pdf",
+    sender_email=None,
+    sender_password=None
+):
 
-    if not sender_email or not sender_password:
-        return False, "Sender credentials not configured. Set them in Settings."
-
-    msg = MIMEMultipart()
-    msg["From"] = sender_email
-    msg["To"] = to_email
-    msg["Subject"] = subject
-
-    # attach HTML
-    msg.attach(MIMEText(html_body, "html"))
-
-    # attach binary (PDF)
-    if attachment_bytes:
-        part = MIMEApplication(attachment_bytes.getvalue(), _subtype="pdf")
-        part.add_header('Content-Disposition', 'attachment', filename=attachment_name)
-        msg.attach(part)
+    # Priority order:
+    # 1. Function parameter
+    # 2. Settings JSON
+    # 3. Streamlit secrets
+    # 4. Default fallback
 
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-        return True, None
-    except Exception as e:
-        return False, str(e)
+        secret_email = st.secrets.get("SENDER_EMAIL", None)
+        secret_password = st.secrets.get("SENDER_PASSWORD", None)
+    except Exception:
+        secret_email = None
+        secret_password = None
+
+    sender_email = (
+        sender_email
+        or settings.get("sender_email")
+        or secret_email
+        or DEFAULT_SENDER_EMAIL
+    )
+
+    sender_password = (
+        sender_password
+        or settings.get("sender_password")
+        or secret_password
+        or DEFAULT_SENDER_PASSWORD
+    )
+
+    if not sender_email or not sender_password:
+        return False, "Sender credentials not configured in Settings."
 
 # ---------------- PDF Payslip generation (Option C: Branded) ----------------
-def generate_payslip_pdf(
-        employee_name,
-        employee_id,
-        start_time,
-        end_time,
-        total_hours,
-        hourly_rate,
-        tax_percent,
-        output_filename="payslip.pdf"
-):
-    # Create PDF document
-    doc = SimpleDocTemplate(
-        output_filename,
-        pagesize=pagesizes.A4
-    )
+# def generate_payslip_pdf(
+#         employee_name,
+#         employee_id,
+#         start_time,
+#         end_time,
+#         total_hours,
+#         hourly_rate,
+#         tax_percent,
+#         output_filename="payslip.pdf"
+# ):
+#     # Create PDF document
+#     doc = SimpleDocTemplate(
+#         output_filename,
+#         pagesize=pagesizes.A4
+#     )
 
-    elements = []
-    styles = getSampleStyleSheet()
+#     elements = []
+#     styles = getSampleStyleSheet()
 
-    # ===== Title =====
-    title_style = styles["Heading1"]
-    elements.append(Paragraph("Salary Payslip", title_style))
-    elements.append(Spacer(1, 0.3 * inch))
+#     # ===== Title =====
+#     title_style = styles["Heading1"]
+#     elements.append(Paragraph("Salary Payslip", title_style))
+#     elements.append(Spacer(1, 0.3 * inch))
 
-    # ===== Calculate Salary =====
-    gross_salary = total_hours * hourly_rate
-    tax_amount = gross_salary * (tax_percent / 100)
-    net_salary = gross_salary - tax_amount
+#     # ===== Calculate Salary =====
+#     gross_salary = total_hours * hourly_rate
+#     tax_amount = gross_salary * (tax_percent / 100)
+#     net_salary = gross_salary - tax_amount
 
-    # ===== Employee Info Table =====
-    employee_data = [
-        ["Employee Name:", employee_name],
-        ["Generated On:", datetime.now().strftime("%d-%m-%Y")],
-    ]
-
-    employee_table = Table(employee_data, colWidths=[2.5 * inch, 3 * inch])
-    employee_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-    ]))
-
-    elements.append(employee_table)
-    elements.append(Spacer(1, 0.4 * inch))
-
-    # ===== Work Details Table =====
-    work_data = [
-        ["Start Time", start_time],
-        ["End Time", end_time],
-        ["Total Working Hours", f"{total_hours} hrs"],
-        ["Hourly Rate", f"€ {hourly_rate:.2f}"],
-        ["Gross Salary", f"€ {gross_salary:.2f}"],
-        ["Tax (%)", f"{tax_percent}%"],
-        ["Tax Amount", f"€ {tax_amount:.2f}"],
-        ["Net Salary", f"€ {net_salary:.2f}"],
-    ]
-
-    work_table = Table(work_data, colWidths=[2.5 * inch, 3 * inch])
-    work_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.beige),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("ROWHEIGHT", (0, 0), (-1, -1), 20),
-    ]))
-
-    elements.append(work_table)
-    elements.append(Spacer(1, 0.5 * inch))
-
-    # ===== Footer =====
-    footer_style = ParagraphStyle(
-        name='Footer',
-        fontSize=10,
-        textColor=colors.grey
-    )
-
-    elements.append(Paragraph("This is a system-generated payslip.", footer_style))
-
-    # Build PDF
-    doc.build(elements)
-
-    print(f"Payslip generated successfully: {output_filename}")
-
-# def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, company_name="MUL Company"):
-#     """
-#     Generates a branded payslip PDF for month (DataFrame df_month).
-#     Returns BytesIO containing PDF.
-#     """
-#     from io import BytesIO
-#     buf = BytesIO()
-#     c = canvas.Canvas(buf, pagesize=A4)
-#     width, height = A4
-
-#     # header background
-#     c.setFillColorRGB(11/255, 94/255, 215/255)  # deep blue
-#     c.rect(0, height - 70, width, 70, fill=1, stroke=0)
-
-#     # logo if available (fit into left of header)
-#     if os.path.exists(logo_path):
-#         try:
-#             c.drawImage(logo_path, 20, height - 60, width=80, height=40, preserveAspectRatio=True, mask='auto')
-#         except Exception:
-#             pass
-
-#     # header text
-#     c.setFillColorRGB(1,1,1)
-#     c.setFont("Helvetica-Bold", 18)
-#     c.drawString(110, height - 45, f"{company_name} - Payslip")
-#     c.setFont("Helvetica", 10)
-#     c.drawString(110, height - 60, f"Month: {year}-{month:02d}")
-
-#     # summary box
-#     left_x = 30
-#     y = height - 110
-#     c.setFillColorRGB(0.96,0.96,0.96)
-#     c.roundRect(left_x, y - 135, width - 60, 120, 8, fill=1)
-#     c.setFillColorRGB(0,0,0)
-#     c.setFont("Helvetica-Bold", 12)
-#     c.drawString(left_x + 8, y - 10, "Monthly Summary")
-#     c.setFont("Helvetica", 10)
-
-#     total_hours = df_month['working_hours'].sum()
-#     payable_hours = min(total_hours, CONTRACT_HOURS)
-#     bonus_total = df_month['bonus'].sum() if 'bonus' in df_month.columns else 0.0
-#     travel_total = df_month['travel_eur'].sum() if 'travel_eur' in df_month.columns else 0.0
-#     salario = round(payable_hours * HOURLY_RATE,2)
-#     tax_total = round(payable_hours * HOURLY_RATE * TAX_RATE,2)
-#     net_total = round(salario - tax_total + bonus_total + travel_total,2)
-
-#     lines = [
-#         f"Total worked hours: {total_hours:.2f} h",
-#         f"Payable hours: {payable_hours:.2f} h",
-#         f"Gross (hourly pay): €{salario:.2f}",
-#         f"Tax: €{tax_total:.2f}",
-#         f"Bonus total: €{bonus_total:.2f}",
-#         f"Travel total: €{travel_total:.2f}",
-#         f"Net pay: €{net_total:.2f}",
+#     # ===== Employee Info Table =====
+#     employee_data = [
+#         ["Employee Name:", employee_name],
+#         ["Generated On:", datetime.now().strftime("%d-%m-%Y")],
 #     ]
-#     tx = left_x + 12
-#     ty = y - 30
-#     for ln in lines:
-#         c.drawString(tx, ty, ln)
-#         ty -= 16
 
-#     # Table of daily entries (compact)
-#     table_y = y - 160
-#     c.setFont("Helvetica-Bold", 10)
-#     c.drawString(left_x, table_y + 10, "Date")
-#     c.drawString(left_x + 80, table_y + 10, "Hours")
-#     c.drawString(left_x + 140, table_y + 10, "Gross")
-#     c.drawString(left_x + 220, table_y + 10, "Tax")
-#     c.setFont("Helvetica", 9)
-#     cur_y = table_y - 6
-#     for _, r in df_month.iterrows():
-#         if cur_y < 60:
-#             c.showPage()
-#             cur_y = height - 60
-#         c.drawString(left_x, cur_y, str(r['date']))
-#         c.drawRightString(left_x + 110, cur_y, f"{r.get('working_hours',0):.2f}")
-#         c.drawRightString(left_x + 200, cur_y, f"€{r.get('gross_hourly',0):.2f}")
-#         c.drawRightString(left_x + 260, cur_y, f"€{r.get('tax',0):.2f}")
-#         cur_y -= 14
+#     employee_table = Table(employee_data, colWidths=[2.5 * inch, 3 * inch])
+#     employee_table.setStyle(TableStyle([
+#         ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+#         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+#         ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+#     ]))
 
-#     # footer
-#     c.setFillColorRGB(0.2,0.2,0.2)
-#     c.setFont("Helvetica-Oblique", 8)
-#     c.drawString(30, 30, "Generated by MUL Salary Tracker")
+#     elements.append(employee_table)
+#     elements.append(Spacer(1, 0.4 * inch))
 
-#     c.showPage()
-#     c.save()
-#     buf.seek(0)
-#     return buf
+#     # ===== Work Details Table =====
+#     work_data = [
+#         ["Start Time", start_time],
+#         ["End Time", end_time],
+#         ["Total Working Hours", f"{total_hours} hrs"],
+#         ["Hourly Rate", f"€ {hourly_rate:.2f}"],
+#         ["Gross Salary", f"€ {gross_salary:.2f}"],
+#         ["Tax (%)", f"{tax_percent}%"],
+#         ["Tax Amount", f"€ {tax_amount:.2f}"],
+#         ["Net Salary", f"€ {net_salary:.2f}"],
+#     ]
+
+#     work_table = Table(work_data, colWidths=[2.5 * inch, 3 * inch])
+#     work_table.setStyle(TableStyle([
+#         ("BACKGROUND", (0, 0), (-1, -1), colors.beige),
+#         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+#         ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+#         ("ROWHEIGHT", (0, 0), (-1, -1), 20),
+#     ]))
+
+#     elements.append(work_table)
+#     elements.append(Spacer(1, 0.5 * inch))
+
+#     # ===== Footer =====
+#     footer_style = ParagraphStyle(
+#         name='Footer',
+#         fontSize=10,
+#         textColor=colors.grey
+#     )
+
+#     elements.append(Paragraph("This is a system-generated payslip.", footer_style))
+
+#     # Build PDF
+#     doc.build(elements)
+
+#     print(f"Payslip generated successfully: {output_filename}")
+
+def generate_payslip_pdf_bytes(df_month, year, month, logo_path=LOGO_PATH, company_name="MUL Company"):
+    """
+    Generates a branded payslip PDF for month (DataFrame df_month).
+    Returns BytesIO containing PDF.
+    """
+    from io import BytesIO
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+
+    # header background
+    c.setFillColorRGB(11/255, 94/255, 215/255)  # deep blue
+    c.rect(0, height - 70, width, 70, fill=1, stroke=0)
+
+    # logo if available (fit into left of header)
+    if os.path.exists(logo_path):
+        try:
+            c.drawImage(logo_path, 20, height - 60, width=80, height=40, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+
+    # header text
+    c.setFillColorRGB(1,1,1)
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(110, height - 45, f"{company_name} - Payslip")
+    c.setFont("Helvetica", 10)
+    c.drawString(110, height - 60, f"Month: {year}-{month:02d}")
+
+    # summary box
+    left_x = 30
+    y = height - 110
+    c.setFillColorRGB(0.96,0.96,0.96)
+    c.roundRect(left_x, y - 135, width - 60, 120, 8, fill=1)
+    c.setFillColorRGB(0,0,0)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left_x + 8, y - 10, "Monthly Summary")
+    c.setFont("Helvetica", 10)
+
+    total_hours = df_month['working_hours'].sum()
+    payable_hours = min(total_hours, CONTRACT_HOURS)
+    bonus_total = df_month['bonus'].sum() if 'bonus' in df_month.columns else 0.0
+    travel_total = df_month['travel_eur'].sum() if 'travel_eur' in df_month.columns else 0.0
+    salario = round(payable_hours * HOURLY_RATE,2)
+    tax_total = round(payable_hours * HOURLY_RATE * TAX_RATE,2)
+    net_total = round(salario - tax_total + bonus_total + travel_total,2)
+
+    lines = [
+        f"Total worked hours: {total_hours:.2f} h",
+        f"Payable hours: {payable_hours:.2f} h",
+        f"Gross (hourly pay): €{salario:.2f}",
+        f"Tax: €{tax_total:.2f}",
+        f"Bonus total: €{bonus_total:.2f}",
+        f"Travel total: €{travel_total:.2f}",
+        f"Net pay: €{net_total:.2f}",
+    ]
+    tx = left_x + 12
+    ty = y - 30
+    for ln in lines:
+        c.drawString(tx, ty, ln)
+        ty -= 16
+
+    # Table of daily entries (compact)
+    table_y = y - 160
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(left_x, table_y + 10, "Date")
+    c.drawString(left_x + 80, table_y + 10, "Hours")
+    c.drawString(left_x + 140, table_y + 10, "Gross")
+    c.drawString(left_x + 220, table_y + 10, "Tax")
+    c.setFont("Helvetica", 9)
+    cur_y = table_y - 6
+    for _, r in df_month.iterrows():
+        if cur_y < 60:
+            c.showPage()
+            cur_y = height - 60
+        c.drawString(left_x, cur_y, str(r['date']))
+        c.drawRightString(left_x + 110, cur_y, f"{r.get('working_hours',0):.2f}")
+        c.drawRightString(left_x + 200, cur_y, f"€{r.get('gross_hourly',0):.2f}")
+        c.drawRightString(left_x + 260, cur_y, f"€{r.get('tax',0):.2f}")
+        cur_y -= 14
+
+    # footer
+    c.setFillColorRGB(0.2,0.2,0.2)
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(30, 30, "Generated by MUL Salary Tracker")
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
 
 # ---------------- AUTO MONTHLY SENDER ----------------
 def try_auto_send_on_start():
@@ -450,7 +459,7 @@ def try_auto_send_on_start():
     )
     html = build_email_html(summary)
     # PDF
-    pdf_bytes = generate_payslip_pdf(df_m, today.year, today.month, logo_path=LOGO_PATH)
+    pdf_bytes = generate_payslip_pdf_bytes(df_m, today.year, today.month, logo_path=LOGO_PATH)
     ok, err = send_email_with_attachment(recipient, f"MUL Salary Summary {today.year}-{today.month:02d}", html,
                                         attachment_bytes=pdf_bytes)
     if ok:
@@ -828,11 +837,11 @@ with tabs[2]:
 
             col_e1, col_e2 = st.columns([2,1])
             with col_e1:
-                if st.button("Generate PDF Payslip (preview)", width="stretch"):
+                if st.button("Generate PDF Payslip (preview)", use_container_width=True):
                     if df_m.empty:
                         st.warning("No data this month to generate payslip.")
                     else:
-                        pdf_buf = generate_payslip_pdf(
+                        pdf_buf = generate_payslip_pdf_bytes(
                             df_m, year, month, logo_path=LOGO_PATH
                         )
 
@@ -841,17 +850,17 @@ with tabs[2]:
                             data=pdf_buf,
                             file_name=f"payslip_{year}_{month:02d}.pdf",
                             mime="application/pdf",
-                            width="stretch"
+                            use_container_width=True
                         )
 
             with col_e2:
-                if st.button("Send Email (with PDF)", width="stretch"):
+                if st.button("Send Email (with PDF)", use_container_width=True):
                     if not email_to.strip():
                         st.error("Please enter recipient email.")
                     elif df_m.empty:
                         st.error("No data for this month to send.")
                     else:
-                        pdf_buf = generate_payslip_pdf(
+                        pdf_buf = generate_payslip_pdf_bytes(
                             df_m, year, month, logo_path=LOGO_PATH
                         )
 
@@ -879,7 +888,7 @@ with tabs[2]:
                         "Value":[total_hours,payable_hours,salario,tax_total,bonus_total,travel_total,net_total]
                     })
                     summary_df.to_excel(writer, index=False, sheet_name="Totals")
-                    writer.save()
+
                 towrite.seek(0)
                 st.download_button(label="Download Excel", data=towrite, file_name=f"mul_summary_{year}_{month:02d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
